@@ -21,13 +21,14 @@ def rarl_rollout(env, agent1, agent2, policy_num, max_path_length=np.inf, animat
         a1, agent1_info = agent1.get_action(o)
         a2, agent2_info = agent2.get_action(o)
         action_true = np.append(a1,a2)
-
         Action = {}
         Action['action'] = np.append(a1,a2)
-        Action['dist1'] = agent1_info
-        Action['dist2'] = agent2_info
+        # Action['dist1'] = agent1_info
+        # Action['dist2'] = agent2_info
         Action['policy_num'] = policy_num
         next_o, r, d, env_info = env.step(Action)
+        # print(' ')
+        # print('policy_num: ',policy_num,' a1: ',a1,' a2: ',a2,' reward: ',r)
         observations.append(env.observation_space.flatten(o))
 
         if policy_num==1:

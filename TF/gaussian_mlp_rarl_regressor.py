@@ -22,6 +22,7 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
             name,
             input_shape,
             output_dim,
+            observation_space,
             mean_network=None,
             hidden_sizes=(32, 32),
             hidden_nonlinearity=tf.nn.tanh,
@@ -127,6 +128,7 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
             self.x_std_var = x_std_var
             self.y_mean_var = y_mean_var
             self.y_std_var = y_std_var
+            self.observation_space = observation_space
 
             normalized_xs_var = (xs_var - x_mean_var) / x_std_var
             normalized_ys_var = (ys_var - y_mean_var) / y_std_var
@@ -240,10 +242,14 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
         return self._dist.sample(dict(mean=means, log_std=log_stds))
 
     def get_action(self,observation):
-        observation = np.reshape(observation,(1,self.input_dim))
-        mean, log_std = self._f_pdists(observation)
+        # print(self._name)
+        flat_obs = self.observation_space.flatten(observation)
+        # print("ob1: ",flat_obs)
+        # observation = np.reshape(observation,(1,self.input_dim))
+        # print("ob2: ",observation)
+        mean, log_std = self._f_pdists([flat_obs])
         rnd = np.random.normal(size=mean.shape)
-        action = rnd * np.exp(log_std) + mean
+        action = self._dist.sample(dict(mean=mean, log_std=log_std))
         return action, dict(mean=mean, log_std=log_std)
 
     def reset(self): #do nothing
