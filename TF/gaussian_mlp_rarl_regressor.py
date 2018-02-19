@@ -22,6 +22,7 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
             name,
             input_shape,
             output_dim,
+            # observation_space,
             mean_network=None,
             hidden_sizes=(32, 32),
             hidden_nonlinearity=tf.nn.tanh,
@@ -127,7 +128,7 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
             self.x_std_var = x_std_var
             self.y_mean_var = y_mean_var
             self.y_std_var = y_std_var
-            self.observation_space = observation_space
+            # self.observation_space = observation_space
 
             normalized_xs_var = (xs_var - x_mean_var) / x_std_var
             normalized_ys_var = (ys_var - y_mean_var) / y_std_var
