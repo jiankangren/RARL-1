@@ -243,11 +243,12 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
 
     def get_action(self,observation):
         # print(self._name)
-        flat_obs = self.observation_space.flatten(observation)
+        # flat_obs = self.observation_space.flatten(observation)
         # print("ob1: ",flat_obs)
-        # observation = np.reshape(observation,(1,self.input_dim))
+        observation = np.reshape(observation,(1,self.input_dim))
         # print("ob2: ",observation)
-        mean, log_std = self._f_pdists([flat_obs])
+        # mean, log_std = self._f_pdists([flat_obs])
+        mean, log_std = self._f_pdists(observation)
         rnd = np.random.normal(size=mean.shape)
         action = self._dist.sample(dict(mean=mean, log_std=log_std))
         return action, dict(mean=mean, log_std=log_std)
