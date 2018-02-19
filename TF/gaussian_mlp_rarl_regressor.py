@@ -22,7 +22,6 @@ class GaussianMLPRegressor(LayersPowered, Serializable):
             name,
             input_shape,
             output_dim,
-            observation_space,
             mean_network=None,
             hidden_sizes=(32, 32),
             hidden_nonlinearity=tf.nn.tanh,
