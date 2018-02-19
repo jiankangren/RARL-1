@@ -300,7 +300,7 @@ class RARL(TRPO):
                     if self.clip_path:
                         clipped_paths = copy.deepcopy(paths)    
                         for clipped_path in clipped_paths:
-                            clipped_paths["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
+                            clipped_path["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
                         self.buffer1.populate(clipped_paths)
                     else:
                         self.buffer1.populate(paths)
@@ -353,7 +353,7 @@ class RARL(TRPO):
                             if self.clip_path:
                                 clipped_paths = copy.deepcopy(paths)    
                                 for clipped_path in clipped_paths:
-                                    clipped_paths["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
+                                    clipped_path["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
                                 self.buffer2.populate(clipped_paths)
                             else:
                                 self.buffer2.populate(paths)
