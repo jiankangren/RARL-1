@@ -26,6 +26,7 @@ class RARL(TRPO):
             policy2_class=None,
             policy2_args=None,
             policies2=None,
+            baselines2=None,
             optimizer_args=None,
             transfer=True,
             record_rewards=True,
@@ -41,6 +42,7 @@ class RARL(TRPO):
         else:
             self.policies2 = policies2
 
+        self.baselines2 = baselines2
         self.optimizers2 = []
         for i in range(N2):
             optimizer_args = dict()
@@ -333,13 +335,15 @@ class RARL(TRPO):
             state_info_list = [agent_infos[k] for k in self.policy.state_info_keys]
             dist_info_list = [agent_infos[k] for k in self.policy.distribution.dist_info_keys]
             all_input_values += tuple(state_info_list) + tuple(dist_info_list)
+            if self.policy.recurrent:
+                all_input_values += (samples_data["valids"],)
         else:
             state_info_list = [agent_infos[k] for k in self.policies2[policy2_num].state_info_keys]
             dist_info_list = [agent_infos[k] for k in self.policies2[policy2_num].distribution.dist_info_keys]
             all_input_values += tuple(state_info_list) + tuple(dist_info_list)
+            if self.policies2[policy2_num].recurrent:
+                all_input_values += (samples_data["valids"],)
 
-        if self.policy.recurrent:
-            all_input_values += (samples_data["valids"],)
         if policy_num == 1:
             logger.log("Computing loss before")
             loss_before = self.optimizer.loss(all_input_values)
@@ -371,7 +375,10 @@ class RARL(TRPO):
 
     @overrides
     def obtain_samples(self, itr, policy_num, policy2_num=-1):
-        return self.sampler.obtain_samples(itr, policy_num)
+        return self.sampler.obtain_samples(itr, policy_num, policy2_num)
+    @overrides
+    def process_samples(self, itr, paths, policy_num, policy2_num=-1):
+        return self.sampler.process_samples(itr, paths, policy_num, policy2_num)
 
     @overrides
     def train(self, sess=None):
@@ -386,39 +393,38 @@ class RARL(TRPO):
         start_time = time.time()
         for itr in range(self.start_itr, self.n_itr):
             itr_start_time = time.time()
-            
-            for n1 in range(self.n_1):
-                with logger.prefix('itr #%d ' % itr + 'n1 #%d |' % n1):
-                    logger.log("training policy 1...")
-                    logger.log("Obtaining samples...")
-                    paths = self.obtain_samples(itr, 1, policy2_num=random.randint(0,self.N2-1))
-                    logger.log("Processing samples...")
-                    samples_data = self.process_samples(itr, paths)
-
-                    if self.record_rewards:
-                        undiscounted_returns = [sum(path["rewards"]) for path in paths]
-                        average_discounted_return = np.mean([path["returns"][0] for path in paths])
-                        AverageReturn = np.mean(undiscounted_returns)
-                        StdReturn = np.std(undiscounted_returns)
-                        MaxReturn = np.max(undiscounted_returns)
-                        MinReturn = np.min(undiscounted_returns)
-                        self.rewards['average_discounted_return1'].append(average_discounted_return)
-                        self.rewards['AverageReturn1'].append(AverageReturn)
-                        self.rewards['StdReturn1'].append(StdReturn)
-                        self.rewards['MaxReturn1'].append(MaxReturn)
-                        self.rewards['MinReturn1'].append(MinReturn)
-
-
-                    logger.log("Logging diagnostics...")
-                    self.log_diagnostics(paths, 1)
-                    logger.log("Optimizing policy...")
-                    self.optimize_policy(itr, samples_data, 1)
-
-                    logger.record_tabular('Time', time.time() - start_time)
-                    logger.record_tabular('ItrTime', time.time() - itr_start_time)
-                    logger.dump_tabular(with_prefix=False)
 
             for policy2_num in range(self.N2):
+                for n1 in range(self.n_1):
+                    with logger.prefix('itr #%d ' % itr + 'policy2_num #%d |' % policy2_num + 'n1 #%d |' % n1):                  
+                        logger.log("training policy 1...")
+                        logger.log("Obtaining samples...")
+                        paths = self.obtain_samples(itr, 1, policy2_num=policy2_num)
+                        logger.log("Processing samples...")
+                        samples_data = self.process_samples(itr, paths, 1)
+
+                        if self.record_rewards:
+                            undiscounted_returns = [sum(path["rewards"]) for path in paths]
+                            average_discounted_return = np.mean([path["returns"][0] for path in paths])
+                            AverageReturn = np.mean(undiscounted_returns)
+                            StdReturn = np.std(undiscounted_returns)
+                            MaxReturn = np.max(undiscounted_returns)
+                            MinReturn = np.min(undiscounted_returns)
+                            self.rewards['average_discounted_return1'].append(average_discounted_return)
+                            self.rewards['AverageReturn1'].append(AverageReturn)
+                            self.rewards['StdReturn1'].append(StdReturn)
+                            self.rewards['MaxReturn1'].append(MaxReturn)
+                            self.rewards['MinReturn1'].append(MinReturn)
+
+
+                        logger.log("Logging diagnostics...")
+                        self.log_diagnostics(paths, 1)
+                        logger.log("Optimizing policy...")
+                        self.optimize_policy(itr, samples_data, 1)
+
+                        logger.record_tabular('Time', time.time() - start_time)
+                        logger.record_tabular('ItrTime', time.time() - itr_start_time)
+                        logger.dump_tabular(with_prefix=False)
                 for n2 in range(self.n_2):
                     if itr != self.n_itr-1: #don't train adversary at last time
                         with logger.prefix('itr #%d ' % itr + 'policy2_num #%d |' % policy2_num + 'n2 #%d |' % n2):
@@ -426,7 +432,7 @@ class RARL(TRPO):
                             logger.log("Obtaining samples...")
                             paths = self.obtain_samples(itr, 2, policy2_num=policy2_num)
                             logger.log("Processing samples...")
-                            samples_data = self.process_samples(itr, paths)
+                            samples_data = self.process_samples(itr, paths, 2, policy2_num)
 
                             if self.record_rewards:
                                 undiscounted_returns = [sum(path["rewards"]) for path in paths]
@@ -471,6 +477,7 @@ class RARL(TRPO):
                 policy=self.policy,
                 policies2=self.policies2,
                 baseline=self.baseline,
+                baselines2=self.baselines2,
                 env=self.env,
                 rewards=self.rewards,
             )
@@ -480,6 +487,7 @@ class RARL(TRPO):
                 policy=self.policy,
                 policies2=self.policies2,
                 baseline=self.baseline,
+                baselines2=self.baselines2,
                 env=self.env,
             )
 
@@ -488,6 +496,9 @@ class RARL(TRPO):
         self.env.log_diagnostics(paths)
         if policy_num == 1:
             self.policy.log_diagnostics(paths)
+            self.baseline.log_diagnostics(paths)
         else:
             self.policies2[policy2_num].log_diagnostics(paths)
-        self.baseline.log_diagnostics(paths)
+            self.baselines2[policy2_num].log_diagnostics(paths)
+        
+
