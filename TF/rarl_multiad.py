@@ -278,7 +278,7 @@ class RARL(TRPO):
                     with logger.prefix('itr #%d ' % itr + 'policy2_num #%d |' % policy2_num + 'n1 #%d |' % n1):                  
                         logger.log("training policy 1...")
                         logger.log("Obtaining samples...")
-                        paths = self.obtain_samples(itr, 1, policy2_num=policy2_num)
+                        paths = self.obtain_samples(itr, 1, policy2_num=np.random.randint(0,self.N2))
                         logger.log("Processing samples...")
                         samples_data = self.process_samples(itr, paths, 1)
 
