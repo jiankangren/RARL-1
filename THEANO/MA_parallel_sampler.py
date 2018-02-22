@@ -1,4 +1,4 @@
-from THEANO.KL_rollout import rarl_rollout
+from THEANO.MA_rollout import rarl_rollout
 from rllab.sampler.stateful_pool import singleton_pool, SharedGlobal
 from rllab.misc import ext
 from rllab.misc import logger
@@ -97,7 +97,7 @@ def _worker_set_env_params(G,params,scope=None):
 
 def _worker_collect_one_path(G, policy_num, policy2_num,max_path_length, scope=None):
     G = _get_scoped_G(G, scope)
-    path = rarl_rollout(G.env, G.policy1, G.policies2[policy2_num], policy_num, max_path_length)
+    path = rarl_rollout(G.env, G.policy1, G.policies2[policy2_num], policy_num, policy2_num, max_path_length)
     return path, len(path["rewards"])
 
 
