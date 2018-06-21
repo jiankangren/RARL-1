@@ -36,8 +36,8 @@ def _worker_populate_task(G, env, policy1, policy2, regressor1, regressor2,scope
     G.env = pickle.loads(env)
     G.policy1 = pickle.loads(policy1)
     G.policy2 = pickle.loads(policy2)
-    G.regressor1 = regressor1
-    G.regressor2 = regressor2
+    G.regressor1 = pickle.loads(regressor1)
+    G.regressor2 = pickle.loads(regressor2)
 
 def _worker_terminate_task(G, scope=None):
     G = _get_scoped_G(G, scope)

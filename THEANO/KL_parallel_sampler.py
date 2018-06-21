@@ -63,7 +63,7 @@ def populate_task(env, policy1, policy2, scope=None):
         G.env = env
         G.policy1 = policy1
         G.policy2 = policy2
-    logger.log("Populated")
+
 
 
 def terminate_task(scope=None):
