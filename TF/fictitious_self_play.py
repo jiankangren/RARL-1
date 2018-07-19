@@ -11,6 +11,7 @@ from TF.FSP_sampler import RARLSampler
 from rllab.misc.overrides import overrides
 from TF.reservoir_buffer import ReservoirBuffer
 import numpy as np
+import copy
 
 class RARL(TRPO):
 
@@ -34,6 +35,7 @@ class RARL(TRPO):
             Nr2=1,
             reset_regressor=False,
             use_regressor1=True,
+            clip_path=True,
             buffer_size=2e4,
             buffer_keep_prob=0.25,
             buffer1=None,
@@ -88,6 +90,7 @@ class RARL(TRPO):
         self.regressor2 = regressor2
         self.reset_regressor = reset_regressor
         self.use_regressor1 = use_regressor1
+        self.clip_path = clip_path
         super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
 
     @overrides
@@ -291,7 +294,17 @@ class RARL(TRPO):
                 with logger.prefix('itr #%d ' % itr + 'n1 #%d |' % n1):
                     logger.log("training policy 1...")
                     logger.log("Obtaining samples...")
+
                     paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=True,policy_num=1)
+
+                    if self.clip_path:
+                        clipped_paths = copy.deepcopy(paths)    
+                        for clipped_path in clipped_paths:
+                            clipped_path["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
+                        self.buffer1.populate(clipped_paths)
+                    else:
+                        self.buffer1.populate(paths)
+
                     logger.log("Processing samples...")
                     samples_data = self.process_samples(itr, paths, 1)
 
@@ -320,10 +333,6 @@ class RARL(TRPO):
             if self.use_regressor1:
                 for nr1 in range(self.Nr1):
                     with logger.prefix('itr #%d ' % itr + 'nr1 #%d |' % nr1):
-                        paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=True,policy_num=1)
-                        for path in paths:
-                            path["actions"] = np.clip(path["actions"],-1.0,1.0)
-                        self.buffer1.populate(paths)
                         xs, ys = self.buffer1.get_data()
                         loss1 = self.regressor1.fit(xs,ys)
                         if self.record_rewards:
@@ -335,10 +344,20 @@ class RARL(TRPO):
                         with logger.prefix('itr #%d ' % itr + 'n2 #%d |' % n2):
                             logger.log("training policy 2...")
                             logger.log("Obtaining samples...")
+
                             if self.use_regressor1:
                                 paths = self.obtain_samples(itr=itr,player1_avg=True,player2_avg=False,policy_num=2)
                             else:
                                 paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=False,policy_num=2)
+
+                            if self.clip_path:
+                                clipped_paths = copy.deepcopy(paths)    
+                                for clipped_path in clipped_paths:
+                                    clipped_path["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
+                                self.buffer2.populate(clipped_paths)
+                            else:
+                                self.buffer2.populate(paths)
+
                             logger.log("Processing samples...")
                             samples_data = self.process_samples(itr, paths, 2)
 
@@ -365,13 +384,6 @@ class RARL(TRPO):
                             logger.dump_tabular(with_prefix=False)
                 for nr2 in range(self.Nr2):
                     with logger.prefix('itr #%d ' % itr + 'nr2 #%d |' % nr2):
-                        if self.use_regressor1:
-                            paths = self.obtain_samples(itr=itr,player1_avg=True,player2_avg=False,policy_num=2)
-                        else:
-                            paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=False,policy_num=2)
-                        for path in paths:
-                            path["actions"] = np.clip(path["actions"],-1.0,1.0)
-                        self.buffer2.populate(paths)
                         xs, ys = self.buffer2.get_data()
                         loss2 = self.regressor2.fit(xs,ys)
                         if self.record_rewards:
