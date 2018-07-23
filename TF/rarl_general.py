@@ -33,7 +33,8 @@ class RARL(TRPO):
         sampler_args = dict()
         self.policy2 = policy2
         self.baseline2 = baseline2
-        optimizer_args = dict()
+        if optimizer_args is None:
+            optimizer_args = dict()
         self.optimizer2 = ConjugateGradientOptimizer(**optimizer_args)
 
         self.obs1_dim = obs1_dim
