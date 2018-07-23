@@ -30,7 +30,7 @@ class RARLSampler(BaseSampler):
     def shutdown_worker(self):
         parallel_sampler.terminate_task(scope=self.algo.scope)
 
-    def obtain_samples(self, itr,policy_num):
+    def obtain_samples(self, itr, policy_num, sample_policy_1):
         policy1_params_old=self.algo.policy.get_param_values()
         policy2_params_old=self.algo.policy2.get_param_values()
         rand_itr = 0
@@ -43,9 +43,13 @@ class RARLSampler(BaseSampler):
             # cur_params2 = self.algo.policy2.get_param_values()
             cur_params2 = obj['params2']
         elif policy_num == 2:
+            if sample_policy_1:
             # cur_params1 = self.algo.policy.get_param_values()
-            cur_params1 = obj['params1']
-            cur_params2 = self.algo.policy2.get_param_values()
+                cur_params1 = obj['params1']
+                cur_params2 = self.algo.policy2.get_param_values()
+            else:
+                cur_params1 = self.algo.policy.get_param_values()
+                cur_params2 = self.algo.policy2.get_param_values()
 
         cur_env_params = self.algo.env.get_param_values()
         paths = parallel_sampler.sample_paths(

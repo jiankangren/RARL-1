@@ -46,7 +46,8 @@ class RARL(TRPO):
         sampler_args = dict()
         self.policy2 = policy2
         self.baseline2 = baseline2
-        optimizer_args = dict()
+        if optimizer_args is None:
+            optimizer_args = dict()
         self.optimizer2 = ConjugateGradientOptimizer(**optimizer_args)
 
         self.obs1_dim = obs1_dim
@@ -91,7 +92,7 @@ class RARL(TRPO):
         self.reset_regressor = reset_regressor
         self.use_regressor1 = use_regressor1
         self.clip_path = clip_path
-        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
+        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args,optimizer_args=optimizer_args,**kwargs)
 
     @overrides
     def init_opt(self):
@@ -160,33 +161,33 @@ class RARL(TRPO):
         is_recurrent = int(self.policy2.recurrent)
 
         extra_dims=1 + is_recurrent
-        name = 'obs'
+        name = 'obs2'
         obs_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.obs2_dim], name=name)
 
-        name = 'action'
+        name = 'action2'
         action_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.action2_dim], name=name)
 
         advantage_var = tensor_utils.new_tensor(
-            'advantage',
+            'advantage2',
             ndim=1 + is_recurrent,
             dtype=tf.float32,
         )
         dist = self.policy2.distribution
 
         old_dist_info_vars = {
-            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='old_%s' % k)
+            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='old2_%s' % k)
             for k, shape in dist.dist_info_specs
             }
         old_dist_info_vars_list = [old_dist_info_vars[k] for k in dist.dist_info_keys]
 
         state_info_vars = {
-            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name=k)
+            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='new2_%s' %k)
             for k, shape in self.policy2.state_info_specs
             }
         state_info_vars_list = [state_info_vars[k] for k in self.policy2.state_info_keys]
 
         if is_recurrent:
-            valid_var = tf.placeholder(tf.float32, shape=[None, None], name="valid")
+            valid_var = tf.placeholder(tf.float32, shape=[None, None], name="valid2")
         else:
             valid_var = None
 
@@ -215,6 +216,66 @@ class RARL(TRPO):
             inputs=input_list,
             constraint_name="mean_kl"
         )
+
+
+        # is_recurrent = int(self.policy2.recurrent)
+
+        # extra_dims=1 + is_recurrent
+        # name = 'obs'
+        # obs_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.obs2_dim], name=name)
+
+        # name = 'action'
+        # action_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.action2_dim], name=name)
+
+        # advantage_var = tensor_utils.new_tensor(
+        #     'advantage',
+        #     ndim=1 + is_recurrent,
+        #     dtype=tf.float32,
+        # )
+        # dist = self.policy2.distribution
+
+        # old_dist_info_vars = {
+        #     k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='old_%s' % k)
+        #     for k, shape in dist.dist_info_specs
+        #     }
+        # old_dist_info_vars_list = [old_dist_info_vars[k] for k in dist.dist_info_keys]
+
+        # state_info_vars = {
+        #     k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name=k)
+        #     for k, shape in self.policy2.state_info_specs
+        #     }
+        # state_info_vars_list = [state_info_vars[k] for k in self.policy2.state_info_keys]
+
+        # if is_recurrent:
+        #     valid_var = tf.placeholder(tf.float32, shape=[None, None], name="valid")
+        # else:
+        #     valid_var = None
+
+        # dist_info_vars = self.policy2.dist_info_sym(obs_var, state_info_vars)
+        # kl = dist.kl_sym(old_dist_info_vars, dist_info_vars)
+        # lr = dist.likelihood_ratio_sym(action_var, old_dist_info_vars, dist_info_vars)
+        # if is_recurrent:
+        #     mean_kl = tf.reduce_sum(kl * valid_var) / tf.reduce_sum(valid_var)
+        #     surr_loss = - tf.reduce_sum(lr * advantage_var * valid_var) / tf.reduce_sum(valid_var)
+        # else:
+        #     mean_kl = tf.reduce_mean(kl)
+        #     surr_loss = - tf.reduce_mean(lr * advantage_var)
+
+        # input_list = [
+        #                  obs_var,
+        #                  action_var,
+        #                  advantage_var,
+        #              ] + state_info_vars_list + old_dist_info_vars_list
+        # if is_recurrent:
+        #     input_list.append(valid_var)
+
+        # self.optimizer2.update_opt(
+        #     loss=surr_loss,
+        #     target=self.policy2,
+        #     leq_constraint=(mean_kl, self.step_size),
+        #     inputs=input_list,
+        #     constraint_name="mean_kl"
+        # )
 
     @overrides
     def optimize_policy(self, itr, samples_data, policy_num):

@@ -28,6 +28,7 @@ class RARL(TRPO):
             transfer=True,
             record_rewards=True,
             rewards=None,
+            sample_policy_1=False,
             N1=1,
             N2=1,
             policy_save_interval=50,
@@ -68,6 +69,7 @@ class RARL(TRPO):
 
         self.policy_path = policy_path
         self.policy_save_interval = policy_save_interval
+        self.sample_policy_1 = sample_policy_1
 
         super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
 
@@ -244,7 +246,7 @@ class RARL(TRPO):
 
     @overrides
     def obtain_samples(self, itr, policy_num):
-        return self.sampler.obtain_samples(itr, policy_num)
+        return self.sampler.obtain_samples(itr, policy_num, self.sample_policy_1)
 
     @overrides
     def process_samples(self, itr, paths, policy_num):
