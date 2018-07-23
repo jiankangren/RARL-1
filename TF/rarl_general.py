@@ -61,7 +61,7 @@ class RARL(TRPO):
 
         self.N1 = N1
         self.N2 = N2
-        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
+        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, optimizer_args=optimizer_args,**kwargs)
 
     @overrides
     def init_opt(self):
