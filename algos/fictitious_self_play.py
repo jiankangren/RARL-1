@@ -7,10 +7,11 @@ import tensorflow as tf
 
 from sandbox.rocky.tf.algos.trpo import TRPO
 from sandbox.rocky.tf.optimizers.conjugate_gradient_optimizer import ConjugateGradientOptimizer
-from TF.FSPGIM_sampler import RARLSampler
+from samplers.fsp_sampler import RARLSampler
 from rllab.misc.overrides import overrides
-from TF.reservoir_buffer import ReservoirBuffer
+from utils.reservoir_buffer import ReservoirBuffer
 import numpy as np
+import copy
 
 class RARL(TRPO):
 
@@ -25,6 +26,7 @@ class RARL(TRPO):
             action1_dim,
             action2_dim,
             optimizer_args=None,
+            optimizer2_args=None,
             transfer=True,
             record_rewards=True,
             rewards=None,
@@ -32,12 +34,9 @@ class RARL(TRPO):
             N2=1,
             Nr1=1,
             Nr2=1,
-            action2_limit=0.0,
-            action2_limit_increase_step=0.1,
-            action2_limit_increase_gap=100,
-            reset_policy2=False,
             reset_regressor=False,
             use_regressor1=True,
+            clip_path=True,
             buffer_size=2e4,
             buffer_keep_prob=0.25,
             buffer1=None,
@@ -48,8 +47,11 @@ class RARL(TRPO):
         sampler_args = dict()
         self.policy2 = policy2
         self.baseline2 = baseline2
-        optimizer_args = dict()
-        self.optimizer2 = ConjugateGradientOptimizer(**optimizer_args)
+        if optimizer_args is None:
+            optimizer_args = dict()
+        if optimizer2_args is None:
+            optimizer2_args = dict()
+        self.optimizer2 = ConjugateGradientOptimizer(**optimizer2_args)
 
         self.obs1_dim = obs1_dim
         self.obs2_dim = obs2_dim
@@ -90,14 +92,10 @@ class RARL(TRPO):
             self.buffer2 = buffer2
         self.regressor1 = regressor1
         self.regressor2 = regressor2
-
-        self.action2_limit = action2_limit
-        self.action2_limit_increase_gap = action2_limit_increase_gap
-        self.action2_limit_increase_step = action2_limit_increase_step
-        self.reset_policy2 = reset_policy2
         self.reset_regressor = reset_regressor
         self.use_regressor1 = use_regressor1
-        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
+        self.clip_path = clip_path
+        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args,optimizer_args=optimizer_args,**kwargs)
 
     @overrides
     def init_opt(self):
@@ -166,33 +164,33 @@ class RARL(TRPO):
         is_recurrent = int(self.policy2.recurrent)
 
         extra_dims=1 + is_recurrent
-        name = 'obs'
+        name = 'obs2'
         obs_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.obs2_dim], name=name)
 
-        name = 'action'
+        name = 'action2'
         action_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.action2_dim], name=name)
 
         advantage_var = tensor_utils.new_tensor(
-            'advantage',
+            'advantage2',
             ndim=1 + is_recurrent,
             dtype=tf.float32,
         )
         dist = self.policy2.distribution
 
         old_dist_info_vars = {
-            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='old_%s' % k)
+            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='old2_%s' % k)
             for k, shape in dist.dist_info_specs
             }
         old_dist_info_vars_list = [old_dist_info_vars[k] for k in dist.dist_info_keys]
 
         state_info_vars = {
-            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name=k)
+            k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='new2_%s' %k)
             for k, shape in self.policy2.state_info_specs
             }
         state_info_vars_list = [state_info_vars[k] for k in self.policy2.state_info_keys]
 
         if is_recurrent:
-            valid_var = tf.placeholder(tf.float32, shape=[None, None], name="valid")
+            valid_var = tf.placeholder(tf.float32, shape=[None, None], name="valid2")
         else:
             valid_var = None
 
@@ -221,6 +219,66 @@ class RARL(TRPO):
             inputs=input_list,
             constraint_name="mean_kl"
         )
+
+
+        # is_recurrent = int(self.policy2.recurrent)
+
+        # extra_dims=1 + is_recurrent
+        # name = 'obs'
+        # obs_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.obs2_dim], name=name)
+
+        # name = 'action'
+        # action_var = tf.placeholder(tf.float32, shape=[None] * extra_dims + [self.action2_dim], name=name)
+
+        # advantage_var = tensor_utils.new_tensor(
+        #     'advantage',
+        #     ndim=1 + is_recurrent,
+        #     dtype=tf.float32,
+        # )
+        # dist = self.policy2.distribution
+
+        # old_dist_info_vars = {
+        #     k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name='old_%s' % k)
+        #     for k, shape in dist.dist_info_specs
+        #     }
+        # old_dist_info_vars_list = [old_dist_info_vars[k] for k in dist.dist_info_keys]
+
+        # state_info_vars = {
+        #     k: tf.placeholder(tf.float32, shape=[None] * (1 + is_recurrent) + list(shape), name=k)
+        #     for k, shape in self.policy2.state_info_specs
+        #     }
+        # state_info_vars_list = [state_info_vars[k] for k in self.policy2.state_info_keys]
+
+        # if is_recurrent:
+        #     valid_var = tf.placeholder(tf.float32, shape=[None, None], name="valid")
+        # else:
+        #     valid_var = None
+
+        # dist_info_vars = self.policy2.dist_info_sym(obs_var, state_info_vars)
+        # kl = dist.kl_sym(old_dist_info_vars, dist_info_vars)
+        # lr = dist.likelihood_ratio_sym(action_var, old_dist_info_vars, dist_info_vars)
+        # if is_recurrent:
+        #     mean_kl = tf.reduce_sum(kl * valid_var) / tf.reduce_sum(valid_var)
+        #     surr_loss = - tf.reduce_sum(lr * advantage_var * valid_var) / tf.reduce_sum(valid_var)
+        # else:
+        #     mean_kl = tf.reduce_mean(kl)
+        #     surr_loss = - tf.reduce_mean(lr * advantage_var)
+
+        # input_list = [
+        #                  obs_var,
+        #                  action_var,
+        #                  advantage_var,
+        #              ] + state_info_vars_list + old_dist_info_vars_list
+        # if is_recurrent:
+        #     input_list.append(valid_var)
+
+        # self.optimizer2.update_opt(
+        #     loss=surr_loss,
+        #     target=self.policy2,
+        #     leq_constraint=(mean_kl, self.step_size),
+        #     inputs=input_list,
+        #     constraint_name="mean_kl"
+        # )
 
     @overrides
     def optimize_policy(self, itr, samples_data, policy_num):
@@ -272,7 +330,7 @@ class RARL(TRPO):
 
     @overrides
     def obtain_samples(self, itr, player1_avg, player2_avg, policy_num):
-        return self.sampler.obtain_samples(itr, player1_avg, player2_avg, policy_num, self.action2_limit)
+        return self.sampler.obtain_samples(itr, player1_avg, player2_avg, policy_num)
     @overrides
     def process_samples(self, itr, paths, policy_num):
         return self.sampler.process_samples(itr, paths, policy_num)
@@ -290,13 +348,6 @@ class RARL(TRPO):
         start_time = time.time()
         for itr in range(self.start_itr, self.n_itr):
             itr_start_time = time.time()
-            if (itr % self.action2_limit_increase_gap == 0) and (itr != 0):
-                self.action2_limit += self.action2_limit_increase_step
-                if self.action2_limit > 1.0:
-                    self.action2_limit = 1.0
-                if self.reset_policy2:
-                    for var in self.policy2.get_params(trainable=True):
-                        sess.run(var.initializer)
             if self.reset_regressor:
                 for var in self.regressor1.get_params(trainable=True):
                     sess.run(var.initializer)
@@ -307,9 +358,19 @@ class RARL(TRPO):
                 with logger.prefix('itr #%d ' % itr + 'n1 #%d |' % n1):
                     logger.log("training policy 1...")
                     logger.log("Obtaining samples...")
+
                     paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=True,policy_num=1)
+
+                    if self.clip_path:
+                        clipped_paths = copy.deepcopy(paths)    
+                        for clipped_path in clipped_paths:
+                            clipped_path["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
+                        self.buffer1.populate(clipped_paths)
+                    else:
+                        self.buffer1.populate(paths)
+
                     logger.log("Processing samples...")
-                    samples_data = self.process_samples(itr, paths,1)
+                    samples_data = self.process_samples(itr, paths, 1)
 
                     if self.record_rewards:
                         undiscounted_returns = [sum(path["rewards"]) for path in paths]
@@ -336,10 +397,6 @@ class RARL(TRPO):
             if self.use_regressor1:
                 for nr1 in range(self.Nr1):
                     with logger.prefix('itr #%d ' % itr + 'nr1 #%d |' % nr1):
-                        paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=True,policy_num=1)
-                        for path in paths:
-                            path["actions"] = np.clip(path["actions"],-1.0,1.0)
-                        self.buffer1.populate(paths)
                         xs, ys = self.buffer1.get_data()
                         loss1 = self.regressor1.fit(xs,ys)
                         if self.record_rewards:
@@ -351,12 +408,22 @@ class RARL(TRPO):
                         with logger.prefix('itr #%d ' % itr + 'n2 #%d |' % n2):
                             logger.log("training policy 2...")
                             logger.log("Obtaining samples...")
+
                             if self.use_regressor1:
                                 paths = self.obtain_samples(itr=itr,player1_avg=True,player2_avg=False,policy_num=2)
                             else:
                                 paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=False,policy_num=2)
+
+                            if self.clip_path:
+                                clipped_paths = copy.deepcopy(paths)    
+                                for clipped_path in clipped_paths:
+                                    clipped_path["actions"] = np.clip(clipped_path["actions"],-1.0,1.0)
+                                self.buffer2.populate(clipped_paths)
+                            else:
+                                self.buffer2.populate(paths)
+
                             logger.log("Processing samples...")
-                            samples_data = self.process_samples(itr, paths,2)
+                            samples_data = self.process_samples(itr, paths, 2)
 
                             if self.record_rewards:
                                 undiscounted_returns = [sum(path["rewards"]) for path in paths]
@@ -381,13 +448,6 @@ class RARL(TRPO):
                             logger.dump_tabular(with_prefix=False)
                 for nr2 in range(self.Nr2):
                     with logger.prefix('itr #%d ' % itr + 'nr2 #%d |' % nr2):
-                        if self.use_regressor1:
-                            paths = self.obtain_samples(itr=itr,player1_avg=True,player2_avg=False,policy_num=2)
-                        else:
-                            paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=False,policy_num=2)
-                        for path in paths:
-                            path["actions"] = np.clip(path["actions"],-self.action2_limit,self.action2_limit)
-                        self.buffer2.populate(paths)
                         xs, ys = self.buffer2.get_data()
                         loss2 = self.regressor2.fit(xs,ys)
                         if self.record_rewards:
@@ -420,7 +480,6 @@ class RARL(TRPO):
                 baseline2=self.baseline2,
                 env=self.env,
                 rewards=self.rewards,
-                action2_limit=self.action2_limit,
             )
         else:
             return dict(
@@ -434,7 +493,6 @@ class RARL(TRPO):
                 baseline=self.baseline,
                 baseline2=self.baseline2,
                 env=self.env,
-                action2_limit=self.action2_limit,
             )
 
     @overrides

@@ -1,4 +1,4 @@
-from THEANO.GIM_rollout import rarl_rollout
+from samplers.lowlevel.rarl_rollout import rarl_rollout
 from rllab.sampler.stateful_pool import singleton_pool, SharedGlobal
 from rllab.misc import ext
 from rllab.misc import logger
@@ -63,7 +63,7 @@ def populate_task(env, policy1, policy2, scope=None):
         G.env = env
         G.policy1 = policy1
         G.policy2 = policy2
-    logger.log("Populated")
+
 
 
 def terminate_task(scope=None):
@@ -94,11 +94,9 @@ def _worker_set_env_params(G,params,scope=None):
     G = _get_scoped_G(G, scope)
     G.env.set_param_values(params)
 
-def _worker_collect_one_path(G, policy_num, action2_limit, max_path_length, scope=None):
+def _worker_collect_one_path(G, policy_num, max_path_length, scope=None):
     G = _get_scoped_G(G, scope)
-    agent1 = G.policy1
-    agent2 = G.policy2
-    path = rarl_rollout(G.env, agent1, agent2, policy_num, action2_limit, max_path_length)
+    path = rarl_rollout(G.env, G.policy1, G.policy2, policy_num, max_path_length)
     return path, len(path["rewards"])
 
 
@@ -106,7 +104,6 @@ def sample_paths(
         policy1_params,
         policy2_params,
         policy_num,
-        action2_limit,
         max_samples,
         max_path_length=np.inf,
         env_params=None,
@@ -131,7 +128,7 @@ def sample_paths(
     return singleton_pool.run_collect(
         _worker_collect_one_path,
         threshold=max_samples,
-        args=(policy_num, action2_limit, max_path_length, scope),
+        args=(policy_num, max_path_length, scope),
         show_prog_bar=True
     )
 

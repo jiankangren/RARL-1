@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from sandbox.rocky.tf.algos.trpo import TRPO
 from sandbox.rocky.tf.optimizers.conjugate_gradient_optimizer import ConjugateGradientOptimizer
-from TF.MultiAd_sampler import RARLSampler
+from samplers.multiAd_sampler import RARLSampler
 from rllab.misc.overrides import overrides
 import numpy as np
 import random
@@ -28,6 +28,7 @@ class RARL(TRPO):
             policies2=None,
             baselines2=None,
             optimizer_args=None,
+            optimizer2_args=None,
             transfer=True,
             record_rewards=True,
             rewards=None,
@@ -41,15 +42,15 @@ class RARL(TRPO):
                 self.policies2.append(policy2_class(name="RARLTFPolicy2_"+str(i),**policy2_args))
         else:
             self.policies2 = policies2
+        if optimizer_args is None:
+            optimizer_args = dict()
 
         self.baselines2 = baselines2
         self.optimizers2 = []
+        if optimizer2_args is None:
+            optimizer2_args = dict()
         for i in range(N2):
-            optimizer_args = dict()
-            self.optimizers2.append(ConjugateGradientOptimizer(**optimizer_args))
-        # self.policy2 = policy2
-        # optimizer_args = dict()
-        # self.optimizer2 = ConjugateGradientOptimizer(**optimizer_args)
+            self.optimizers2.append(ConjugateGradientOptimizer(**optimizer2_args))
 
         self.obs1_dim = obs1_dim
         self.obs2_dim = obs2_dim
@@ -77,7 +78,7 @@ class RARL(TRPO):
         self.n_1 = n_1
         self.n_2 = n_2
         self.N2 = N2
-        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
+        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, optimizer_args=optimizer_args, **kwargs)
 
     @overrides
     def init_opt(self):

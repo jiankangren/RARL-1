@@ -1,4 +1,4 @@
-from THEANO.utils import rarl_rollout
+from samplers.lowlevel.rarl_rollout import rarl_rollout
 from rllab.sampler.stateful_pool import singleton_pool, SharedGlobal
 from rllab.misc import ext
 from rllab.misc import logger
@@ -31,12 +31,13 @@ def _get_scoped_G(G, scope):
     return G.scopes[scope]
 
 
-def _worker_populate_task(G, env, policy1, policy2, scope=None):
+def _worker_populate_task(G, env, policy1, policy2, regressor1, regressor2,scope=None):
     G = _get_scoped_G(G, scope)
     G.env = pickle.loads(env)
     G.policy1 = pickle.loads(policy1)
     G.policy2 = pickle.loads(policy2)
-
+    G.regressor1 = pickle.loads(regressor1)
+    G.regressor2 = pickle.loads(regressor2)
 
 def _worker_terminate_task(G, scope=None):
     G = _get_scoped_G(G, scope)
@@ -49,13 +50,19 @@ def _worker_terminate_task(G, scope=None):
     if getattr(G, "policy2", None):
         G.policy2.terminate()
         G.policy2 = None
+    if getattr(G, "regressor1", None):
+        G.regressor1.terminate()
+        G.regressor1 = None
+    if getattr(G, "regressor2", None):
+        G.regressor2.terminate()
+        G.regressor2 = None
 
-def populate_task(env, policy1, policy2, scope=None):
+def populate_task(env, policy1, policy2, regressor1, regressor2, scope=None):
     logger.log("Populating workers...")
     if singleton_pool.n_parallel > 1:
         singleton_pool.run_each(
             _worker_populate_task,
-            [(pickle.dumps(env), pickle.dumps(policy1), pickle.dumps(policy2), scope)] * singleton_pool.n_parallel
+            [(pickle.dumps(env), pickle.dumps(policy1), pickle.dumps(policy2), pickle.dumps(regressor1),pickle.dumps(regressor2),scope)] * singleton_pool.n_parallel
         )
     else:
         # avoid unnecessary copying
@@ -63,6 +70,8 @@ def populate_task(env, policy1, policy2, scope=None):
         G.env = env
         G.policy1 = policy1
         G.policy2 = policy2
+        G.regressor1 = regressor1
+        G.regressor2 = regressor2
     logger.log("Populated")
 
 
@@ -85,24 +94,36 @@ def set_seed(seed):
     )
 
 
-def _worker_set_policy_params(G, params1, params2, scope=None):
+def _worker_set_policy_params(G, params1, params2, params3, params4, scope=None):
     G = _get_scoped_G(G, scope)
     G.policy1.set_param_values(params1)
     G.policy2.set_param_values(params2)
+    G.regressor1.set_param_values(params3)
+    G.regressor2.set_param_values(params4)
 
 def _worker_set_env_params(G,params,scope=None):
     G = _get_scoped_G(G, scope)
     G.env.set_param_values(params)
 
-def _worker_collect_one_path(G, policy_num, max_path_length, scope=None):
+def _worker_collect_one_path(G, player1_avg, player2_avg,policy_num, max_path_length, scope=None):
     G = _get_scoped_G(G, scope)
-    path = rarl_rollout(G.env, G.policy1, G.policy2, policy_num, max_path_length)
+    agent1 = G.policy1
+    agent2 = G.policy2
+    if player1_avg:
+        agent1 = G.regressor1
+    if player2_avg:
+        agent2 = G.regressor2
+    path = rarl_rollout(G.env, agent1, agent2, policy_num, max_path_length)
     return path, len(path["rewards"])
 
 
 def sample_paths(
         policy1_params,
         policy2_params,
+        regressor1_params,
+        regressor2_params,
+        player1_avg,
+        player2_avg,
         policy_num,
         max_samples,
         max_path_length=np.inf,
@@ -118,7 +139,7 @@ def sample_paths(
     """
     singleton_pool.run_each(
         _worker_set_policy_params,
-        [(policy1_params, policy2_params, scope)] * singleton_pool.n_parallel
+        [(policy1_params, policy2_params, regressor1_params, regressor2_params, scope)] * singleton_pool.n_parallel
     )
     if env_params is not None:
         singleton_pool.run_each(
@@ -128,7 +149,7 @@ def sample_paths(
     return singleton_pool.run_collect(
         _worker_collect_one_path,
         threshold=max_samples,
-        args=(policy_num, max_path_length, scope),
+        args=(player1_avg, player2_avg, policy_num, max_path_length, scope),
         show_prog_bar=True
     )
 

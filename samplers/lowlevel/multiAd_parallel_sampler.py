@@ -1,4 +1,4 @@
-from THEANO.MA_rollout import rarl_rollout
+from samplers.lowlevel.multiAd_rollout import rarl_rollout
 from rllab.sampler.stateful_pool import singleton_pool, SharedGlobal
 from rllab.misc import ext
 from rllab.misc import logger

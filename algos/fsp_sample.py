@@ -7,10 +7,11 @@ import tensorflow as tf
 
 from sandbox.rocky.tf.algos.trpo import TRPO
 from sandbox.rocky.tf.optimizers.conjugate_gradient_optimizer import ConjugateGradientOptimizer
-from TF.FSPGIM_sampler import RARLSampler
+from sampelrs.fsp_sample_sampler import RARLSampler
 from rllab.misc.overrides import overrides
-from TF.reservoir_buffer import ReservoirBuffer
 import numpy as np
+
+import joblib
 
 class RARL(TRPO):
 
@@ -18,36 +19,31 @@ class RARL(TRPO):
             self,
             policy2,
             baseline2,
-            regressor1,
-            regressor2,
             obs1_dim,
             obs2_dim,
             action1_dim,
             action2_dim,
+            policy_path,
             optimizer_args=None,
+            optimizer2_args=None,
             transfer=True,
             record_rewards=True,
             rewards=None,
+            sample_policy_1=False,
             N1=1,
             N2=1,
-            Nr1=1,
-            Nr2=1,
-            action2_limit=0.0,
-            action2_limit_increase_step=0.1,
-            action2_limit_increase_gap=100,
-            reset_policy2=False,
-            buffer_size=2e4,
-            buffer_keep_prob=0.25,
-            buffer1=None,
-            buffer2=None,
+            policy_save_interval=50,
             **kwargs):
         self.transfer = transfer
         sampler_cls = RARLSampler
         sampler_args = dict()
         self.policy2 = policy2
         self.baseline2 = baseline2
-        optimizer_args = dict()
-        self.optimizer2 = ConjugateGradientOptimizer(**optimizer_args)
+        if optimizer_args is None:
+            optimizer_args = dict()
+        if optimizer2_args is None:
+            optimizer2_args = dict()
+        self.optimizer2 = ConjugateGradientOptimizer(**optimizer2_args)
 
         self.obs1_dim = obs1_dim
         self.obs2_dim = obs2_dim
@@ -63,37 +59,23 @@ class RARL(TRPO):
                 self.rewards['StdReturn1'] = []
                 self.rewards['MaxReturn1'] = []
                 self.rewards['MinReturn1'] = []
-                self.rewards['Loss1'] = []
 
                 self.rewards['average_discounted_return2'] = []
                 self.rewards['AverageReturn2'] = []
                 self.rewards['StdReturn2'] = []
                 self.rewards['MaxReturn2'] = []
                 self.rewards['MinReturn2'] = []
-                self.rewards['Loss2'] = []
             else:
                 self.rewards = rewards
 
         self.N1 = N1
         self.N2 = N2
-        self.Nr1 = Nr1
-        self.Nr2 = Nr2
-        if buffer1 is None:
-            self.buffer1 = ReservoirBuffer(size=buffer_size,keep_prob=buffer_keep_prob)
-        else:
-            self.buffer1 = buffer1
-        if buffer2 is None:
-            self.buffer2 = ReservoirBuffer(size=buffer_size,keep_prob=buffer_keep_prob)
-        else:
-            self.buffer2 = buffer2
-        self.regressor1 = regressor1
-        self.regressor2 = regressor2
 
-        self.action2_limit = action2_limit
-        self.action2_limit_increase_gap = action2_limit_increase_gap
-        self.action2_limit_increase_step = action2_limit_increase_step
-        self.reset_policy2 = reset_policy2
-        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, **kwargs)
+        self.policy_path = policy_path
+        self.policy_save_interval = policy_save_interval
+        self.sample_policy_1 = sample_policy_1
+
+        super(RARL, self).__init__(sampler_cls=sampler_cls,sampler_args=sampler_args, optimizer_args=optimizer_args, **kwargs)
 
     @overrides
     def init_opt(self):
@@ -267,11 +249,13 @@ class RARL(TRPO):
         return dict()
 
     @overrides
-    def obtain_samples(self, itr, player1_avg, player2_avg, policy_num):
-        return self.sampler.obtain_samples(itr, player1_avg, player2_avg, policy_num, self.action2_limit)
+    def obtain_samples(self, itr, policy_num):
+        return self.sampler.obtain_samples(itr, policy_num, self.sample_policy_1)
+
     @overrides
     def process_samples(self, itr, paths, policy_num):
         return self.sampler.process_samples(itr, paths, policy_num)
+
 
     @overrides
     def train(self, sess=None):
@@ -285,22 +269,22 @@ class RARL(TRPO):
         self.start_worker()
         start_time = time.time()
         for itr in range(self.start_itr, self.n_itr):
+            if itr == 0 or itr % self.policy_save_interval == 0:
+                params = dict(
+                    params1 = self.policy.get_param_values(),
+                    params2 = self.policy2.get_param_values(),
+                    )
+                joblib.dump(params,self.policy_path+'/params'+str(itr)+'.pkl',compress=3)
+
             itr_start_time = time.time()
-            if itr % self.action2_limit_increase_gap == 0:
-                self.action2_limit += self.action2_limit_increase_step
-                if self.action2_limit > 1.0:
-                    self.action2_limit = 1.0
-                if self.reset_policy2:
-                    for var in self.policy2.get_params(trainable=True):
-                        sess.run(var.initializer)
             
             for n1 in range(self.N1):
                 with logger.prefix('itr #%d ' % itr + 'n1 #%d |' % n1):
                     logger.log("training policy 1...")
                     logger.log("Obtaining samples...")
-                    paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=True,policy_num=1)
+                    paths = self.obtain_samples(itr, 1)
                     logger.log("Processing samples...")
-                    samples_data = self.process_samples(itr, paths,1)
+                    samples_data = self.process_samples(itr, paths, 1)
 
                     if self.record_rewards:
                         undiscounted_returns = [sum(path["rewards"]) for path in paths]
@@ -324,58 +308,38 @@ class RARL(TRPO):
                     logger.record_tabular('Time', time.time() - start_time)
                     logger.record_tabular('ItrTime', time.time() - itr_start_time)
                     logger.dump_tabular(with_prefix=False)
-            for nr1 in range(self.Nr1):
-                with logger.prefix('itr #%d ' % itr + 'nr1 #%d |' % nr1):
-                    paths = self.obtain_samples(itr=itr,player1_avg=False,player2_avg=True,policy_num=1)
-                    for path in paths:
-                        path["actions"] = np.clip(path["actions"],-1.0,1.0)
-                    self.buffer1.populate(paths)
-                    xs, ys = self.buffer1.get_data()
-                    loss1 = self.regressor1.fit(xs,ys)
-                    if self.record_rewards:
-                        self.rewards['Loss1'].append(loss1)
 
-            if itr != self.n_itr-1: #don't train adversary at last time
-                for n2 in range(self.N2):
-                    if itr != self.n_itr-1: #don't train adversary at last time
-                        with logger.prefix('itr #%d ' % itr + 'n2 #%d |' % n2):
-                            logger.log("training policy 2...")
-                            logger.log("Obtaining samples...")
-                            paths = self.obtain_samples(itr=itr,player1_avg=True,player2_avg=False,policy_num=2)
-                            logger.log("Processing samples...")
-                            samples_data = self.process_samples(itr, paths,2)
+            for n2 in range(self.N2):
+                if itr != self.n_itr-1: #don't train adversary at last time
+                    with logger.prefix('itr #%d ' % itr + 'n2 #%d |' % n2):
+                        logger.log("training policy 2...")
+                        logger.log("Obtaining samples...")
+                        paths = self.obtain_samples(itr, 2)
+                        logger.log("Processing samples...")
+                        samples_data = self.process_samples(itr, paths, 2)
 
-                            if self.record_rewards:
-                                undiscounted_returns = [sum(path["rewards"]) for path in paths]
-                                average_discounted_return = np.mean([path["returns"][0] for path in paths])
-                                AverageReturn = np.mean(undiscounted_returns)
-                                StdReturn = np.std(undiscounted_returns)
-                                MaxReturn = np.max(undiscounted_returns)
-                                MinReturn = np.min(undiscounted_returns)
-                                self.rewards['average_discounted_return2'].append(average_discounted_return)
-                                self.rewards['AverageReturn2'].append(AverageReturn)
-                                self.rewards['StdReturn2'].append(StdReturn)
-                                self.rewards['MaxReturn2'].append(MaxReturn)
-                                self.rewards['MinReturn2'].append(MinReturn)
-
-                            logger.log("Logging diagnostics...")
-                            self.log_diagnostics(paths, 2)
-                            logger.log("Optimizing policy...")
-                            self.optimize_policy(itr, samples_data, 2)
-
-                            logger.record_tabular('Time', time.time() - start_time)
-                            logger.record_tabular('ItrTime', time.time() - itr_start_time)
-                            logger.dump_tabular(with_prefix=False)
-                for nr2 in range(self.Nr2):
-                    with logger.prefix('itr #%d ' % itr + 'nr2 #%d |' % nr2):
-                        paths = self.obtain_samples(itr=itr,player1_avg=True,player2_avg=False,policy_num=2)
-                        for path in paths:
-                            path["actions"] = np.clip(path["actions"],-self.action2_limit,self.action2_limit)
-                        self.buffer2.populate(paths)
-                        xs, ys = self.buffer2.get_data()
-                        loss2 = self.regressor2.fit(xs,ys)
                         if self.record_rewards:
-                            self.rewards['Loss2'].append(loss2)
+                            undiscounted_returns = [sum(path["rewards"]) for path in paths]
+                            average_discounted_return = np.mean([path["returns"][0] for path in paths])
+                            AverageReturn = np.mean(undiscounted_returns)
+                            StdReturn = np.std(undiscounted_returns)
+                            MaxReturn = np.max(undiscounted_returns)
+                            MinReturn = np.min(undiscounted_returns)
+                            self.rewards['average_discounted_return2'].append(average_discounted_return)
+                            self.rewards['AverageReturn2'].append(AverageReturn)
+                            self.rewards['StdReturn2'].append(StdReturn)
+                            self.rewards['MaxReturn2'].append(MaxReturn)
+                            self.rewards['MinReturn2'].append(MinReturn)
+
+                        logger.log("Logging diagnostics...")
+                        self.log_diagnostics(paths, 2)
+                        logger.log("Optimizing policy...")
+                        self.optimize_policy(itr, samples_data, 2)
+
+                        logger.record_tabular('Time', time.time() - start_time)
+                        logger.record_tabular('ItrTime', time.time() - itr_start_time)
+                        logger.dump_tabular(with_prefix=False)
+
 
             logger.log("Saving snapshot...")
             params = self.get_itr_snapshot(itr)  # , **kwargs)
@@ -396,29 +360,19 @@ class RARL(TRPO):
                 itr=itr,
                 policy=self.policy,
                 policy2=self.policy2,
-                regressor1=self.regressor1,
-                regressor2=self.regressor2,
-                buffer1=self.buffer1,
-                buffer2=self.buffer2,
                 baseline=self.baseline,
                 baseline2=self.baseline2,
                 env=self.env,
                 rewards=self.rewards,
-                action2_limit=self.action2_limit,
             )
         else:
             return dict(
                 itr=itr,
                 policy=self.policy,
                 policy2=self.policy2,
-                regressor1=self.regressor1,
-                regressor2=self.regressor2,
-                buffer1=self.buffer1,
-                buffer2=self.buffer2,
                 baseline=self.baseline,
                 baseline2=self.baseline2,
                 env=self.env,
-                action2_limit=self.action2_limit,
             )
 
     @overrides
@@ -430,3 +384,4 @@ class RARL(TRPO):
         else:
             self.policy2.log_diagnostics(paths)
             self.baseline2.log_diagnostics(paths)
+        

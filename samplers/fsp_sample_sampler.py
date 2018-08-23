@@ -1,5 +1,5 @@
 from rllab.sampler.base import BaseSampler
-import THEANO.parallel_sampler as parallel_sampler
+import samplers.lowlevel.rarl_parallel_sampler as parallel_sampler
 from rllab.sampler.stateful_pool import singleton_pool
 import tensorflow as tf
 from rllab.misc.overrides import overrides
@@ -8,7 +8,7 @@ from rllab.misc import special
 from rllab.misc import tensor_utils
 from rllab.algos import util
 import rllab.misc.logger as logger
-
+import joblib
 
 def worker_init_tf(G):
     G.sess = tf.Session()
@@ -30,9 +30,27 @@ class RARLSampler(BaseSampler):
     def shutdown_worker(self):
         parallel_sampler.terminate_task(scope=self.algo.scope)
 
-    def obtain_samples(self, itr,policy_num):
-        cur_params1 = self.algo.policy.get_param_values()
-        cur_params2 = self.algo.policy2.get_param_values()
+    def obtain_samples(self, itr, policy_num, sample_policy_1):
+        policy1_params_old=self.algo.policy.get_param_values()
+        policy2_params_old=self.algo.policy2.get_param_values()
+        rand_itr = 0
+        if itr is not 0:
+            rand_itr = np.random.randint(0,itr)
+            rand_itr = int(np.floor(rand_itr/self.algo.policy_save_interval)*self.algo.policy_save_interval)
+        obj = joblib.load(self.algo.policy_path+'/params'+str(rand_itr)+'.pkl')
+        if policy_num == 1:
+            cur_params1 = self.algo.policy.get_param_values()
+            # cur_params2 = self.algo.policy2.get_param_values()
+            cur_params2 = obj['params2']
+        elif policy_num == 2:
+            if sample_policy_1:
+            # cur_params1 = self.algo.policy.get_param_values()
+                cur_params1 = obj['params1']
+                cur_params2 = self.algo.policy2.get_param_values()
+            else:
+                cur_params1 = self.algo.policy.get_param_values()
+                cur_params2 = self.algo.policy2.get_param_values()
+
         cur_env_params = self.algo.env.get_param_values()
         paths = parallel_sampler.sample_paths(
             policy1_params=cur_params1,
@@ -43,12 +61,15 @@ class RARLSampler(BaseSampler):
             max_path_length=self.algo.max_path_length,
             scope=self.algo.scope,
         )
+
+        self.algo.policy.set_param_values(policy1_params_old)
+        self.algo.policy2.set_param_values(policy2_params_old)
+
         if self.algo.whole_paths:
             return paths
         else:
             paths_truncated = parallel_sampler.truncate_paths(paths, self.algo.batch_size)
             return paths_truncated
-
 
     @overrides
     def process_samples(self, itr, paths, policy_num):
@@ -187,6 +208,7 @@ class RARLSampler(BaseSampler):
 
             return samples_data
         else:
+            assert policy_num==2
             if hasattr(self.algo.baseline2, "predict_n"):
                 all_path_baselines = self.algo.baseline2.predict_n(paths)
             else:
@@ -208,7 +230,7 @@ class RARLSampler(BaseSampler):
                 np.concatenate(returns)
             )
 
-            if not self.algo.policy.recurrent:
+            if not self.algo.policy2.recurrent:
                 observations = tensor_utils.concat_tensor_list([path["observations"] for path in paths])
                 actions = tensor_utils.concat_tensor_list([path["actions"] for path in paths])
                 rewards = tensor_utils.concat_tensor_list([path["rewards"] for path in paths])
@@ -228,7 +250,7 @@ class RARLSampler(BaseSampler):
 
                 undiscounted_returns = [sum(path["rewards"]) for path in paths]
 
-                ent = np.mean(self.algo.policy.distribution.entropy(agent_infos))
+                ent = np.mean(self.algo.policy2.distribution.entropy(agent_infos))
 
                 samples_data = dict(
                     observations=observations,
@@ -284,7 +306,7 @@ class RARLSampler(BaseSampler):
 
                 undiscounted_returns = [sum(path["rewards"]) for path in paths]
 
-                ent = np.sum(self.algo.policy.distribution.entropy(agent_infos) * valids) / np.sum(valids)
+                ent = np.sum(self.algo.policy2.distribution.entropy(agent_infos) * valids) / np.sum(valids)
 
                 samples_data = dict(
                     observations=obs,

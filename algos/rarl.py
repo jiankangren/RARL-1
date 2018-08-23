@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from sandbox.rocky.tf.algos.trpo import TRPO
 from sandbox.rocky.tf.optimizers.conjugate_gradient_optimizer import ConjugateGradientOptimizer
-from TF.rarl_KL_sampler import RARLSampler
+from samplers.rarl_sampler import RARLSampler
 from rllab.misc.overrides import overrides
 import numpy as np
 
@@ -22,6 +22,7 @@ class RARL(TRPO):
             action1_dim,
             action2_dim,
             optimizer_args=None,
+            optimizer2_args=None,
             transfer=True,
             record_rewards=True,
             rewards=None,
@@ -35,7 +36,9 @@ class RARL(TRPO):
         self.baseline2 = baseline2
         if optimizer_args is None:
             optimizer_args = dict()
-        self.optimizer2 = ConjugateGradientOptimizer(**optimizer_args)
+        if optimizer2_args is None:
+            optimizer2_args = dict()
+        self.optimizer2 = ConjugateGradientOptimizer(**optimizer2_args)
 
         self.obs1_dim = obs1_dim
         self.obs2_dim = obs2_dim
