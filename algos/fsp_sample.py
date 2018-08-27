@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from sandbox.rocky.tf.algos.trpo import TRPO
 from sandbox.rocky.tf.optimizers.conjugate_gradient_optimizer import ConjugateGradientOptimizer
-from sampelrs.fsp_sample_sampler import RARLSampler
+from samplers.fsp_sample_sampler import RARLSampler
 from rllab.misc.overrides import overrides
 import numpy as np
 
